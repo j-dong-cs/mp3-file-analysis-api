@@ -1,0 +1,84 @@
+# Local dev/prod-like infra for the async large-file pipeline.
+#   MinIO     → S3-compatible object storage (the MP3 bytes)
+#   Redis     → BullMQ job queue backing store
+#   Postgres  → durable upload metadata + frameCount
+#
+# The app runs on the HOST (npm run start:dev) and connects via localhost:<published-port>.
+# Containers talk to each other over the compose network by service name (e.g. http://minio:9000).
+#
+# Start:  docker compose up -d      Stop + wipe:  docker compose down -v
+
+services:
+  postgres:
+    image: postgres:16.14-alpine
+    container_name: mp3-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-mp3}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-mp3}
+      POSTGRES_DB: ${DB_NAME:-mp3}
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-mp3} -d ${DB_NAME:-mp3}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4.9-alpine
+    container_name: mp3-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: mp3-minio
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - '${S3_PORT:-9000}:9000' # S3 API
+      - '${S3_CONSOLE_PORT:-9001}:9001' # web console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:9000/minio/health/live || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: waits for MinIO, then creates the bucket. Exits when done.
+  createbuckets:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: mp3-createbuckets
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY_ID:-minioadmin} ${S3_SECRET_ACCESS_KEY:-minioadmin}; do
+        echo 'waiting for minio...'; sleep 1;
+      done;
+      mc mb --ignore-existing local/${S3_BUCKET:-mp3-uploads};
+      echo 'bucket ready: ${S3_BUCKET:-mp3-uploads}';
+      exit 0;
+      "
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
