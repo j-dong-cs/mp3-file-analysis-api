@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  PayloadTooLargeException,
+} from '@nestjs/common';
+import busboy from 'busboy';
 import type { Request } from 'express';
 
 import { Mp3AnalyzeService } from '../mp3/mp3-analyze.service';
@@ -22,25 +27,84 @@ export class FileUploadService {
   ) {}
 
   countFramesWhileUpload(request: Request): Promise<number> {
-    // PSEUDOCODE:
-    //   parser  = busboy({ headers: request.headers,
-    //                      limits: { files: 1, fileSize: fileValidator.maxBytes } })
-    //   counter = mp3AnalyzeService.createFrameCounter()   // fresh per-request state
-    //
-    //   on parser 'file' (field, stream, info):
-    //     if field !== MP3_FIELD_NAME        → stream.resume() (drain & ignore)
-    //     fileValidator.assertAllowedType(info)             // else 415
-    //     on stream 'data'  (chunk)          → counter.push(chunk)
-    //     on stream 'limit'                  → reject PayloadTooLarge (413)
-    //     on stream 'error'                  → reject
-    //
-    //   on parser 'close':
-    //     if no file part was seen           → reject BadRequest (400)
-    //     else resolve counter.end()         // frame count (throws 422 if none)
-    //
-    //   request.pipe(parser)                 // settle the promise exactly once
-    throw new Error(
-      'Not implemented: FileUploadService.countFramesWhileUpload',
-    );
+    return new Promise<number>((resolve, reject) => {
+      const parser = busboy({
+        headers: request.headers,
+        limits: { files: 1, fileSize: this.fileValidator.maxBytes },
+      });
+      const counter = this.mp3AnalyzeService.createFrameCounter();
+
+      let settled = false;
+      let sawFile = false;
+
+      // The promise must settle exactly once; busboy emits many events.
+      const fail = (err: unknown): void => {
+        if (settled) return;
+        settled = true;
+        request.unpipe(parser);
+        reject(err);
+      };
+      const succeed = (count: number): void => {
+        if (settled) return;
+        settled = true;
+        resolve(count);
+      };
+
+      parser.on('file', (fieldName, fileStream, info) => {
+        // Every file stream must be consumed or busboy stalls (backpressure).
+        if (fieldName !== MP3_FIELD_NAME) {
+          fileStream.resume();
+          return;
+        }
+
+        try {
+          this.fileValidator.assertAllowedType(info);
+        } catch (err) {
+          fileStream.resume();
+          fail(err);
+          return;
+        }
+
+        sawFile = true;
+        fileStream.on('data', (chunk: Buffer) => {
+          if (settled) return;
+          try {
+            counter.feed(chunk);
+          } catch (err) {
+            fail(err);
+          }
+        });
+        fileStream.on('limit', () =>
+          fail(
+            new PayloadTooLargeException('File exceeds the maximum allowed size'),
+          ),
+        );
+        fileStream.on('error', fail);
+      });
+
+      parser.on('close', () => {
+        if (settled) return;
+        if (!sawFile) {
+          fail(
+            new BadRequestException(
+              `No file uploaded under field "${MP3_FIELD_NAME}"`,
+            ),
+          );
+          return;
+        }
+        try {
+          succeed(counter.finalize());
+        } catch (err) {
+          fail(err); // finalize() throws 422 when no frames were found
+        }
+      });
+      parser.on('error', fail);
+
+      request.on('aborted', () =>
+        fail(new BadRequestException('Upload aborted before completion')),
+      );
+
+      request.pipe(parser);
+    });
   }
 }

@@ -2,11 +2,10 @@ import { Injectable } from '@nestjs/common';
 
 import { FrameCounter, StreamingFrameCounter } from './frame-counter';
 
-// Re-exported for consumers that import the counter type from the service.
 export type { FrameCounter };
 
 /**
- * SERVICE — constructs the MP3 frame counter.
+ * MP3 ANALYZE SERVICE
  *
  * Stateless factory: hands out a fresh {@link FrameCounter} per upload so
  * concurrent requests never share parsing state. The counting logic lives in

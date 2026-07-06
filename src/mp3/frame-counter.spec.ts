@@ -5,6 +5,7 @@ import {
   buildFrames,
   buildId3v2,
   buildStream,
+  buildVbrHeaderFrame,
   pushInChunks,
 } from './testing/mp3-fixtures';
 
@@ -104,5 +105,47 @@ describe('StreamingFrameCounter', () => {
 
   it('throws 422 when nothing was ever pushed', () => {
     expect(() => new StreamingFrameCounter().finalize()).toThrow(UnprocessableEntityException);
+  });
+});
+
+describe('StreamingFrameCounter — VBR header frame (Xing/Info/VBRI)', () => {
+  it.each(['Xing', 'Info', 'VBRI'] as const)(
+    'does not count a leading %s header frame',
+    (marker) => {
+      const buf = Buffer.concat([buildVbrHeaderFrame(marker), buildStream(10)]);
+      expect(countWhole(buf)).toBe(10); // 10 audio frames, header frame excluded
+    },
+  );
+
+  it('excludes the Xing frame after a leading ID3v2 tag', () => {
+    const buf = Buffer.concat([
+      buildId3v2(100),
+      buildVbrHeaderFrame('Xing'),
+      buildStream(9),
+    ]);
+    expect(countWhole(buf)).toBe(9);
+  });
+
+  it('excludes the Xing frame regardless of chunk boundaries', () => {
+    const buf = Buffer.concat([buildVbrHeaderFrame('Xing'), buildStream(15)]);
+    // Small chunks force the counter to accumulate enough bytes to classify the
+    // first frame across multiple feeds before deciding to skip it.
+    for (const chunkSize of [1, 7, 36, 40, 417, 5000]) {
+      expect(countChunked(buf, chunkSize)).toBe(15);
+    }
+  });
+
+  it('still counts a normal first frame (no VBR marker)', () => {
+    expect(countWhole(buildStream(1))).toBe(1);
+  });
+
+  it('only the first frame is treated as a possible header (Xing-like bytes later are audio)', () => {
+    // A later frame that happens to contain "Xing" bytes must still be counted.
+    const buf = Buffer.concat([
+      buildStream(1),
+      buildVbrHeaderFrame('Xing'), // 2nd frame — should NOT be skipped
+      buildStream(3),
+    ]);
+    expect(countWhole(buf)).toBe(5);
   });
 });

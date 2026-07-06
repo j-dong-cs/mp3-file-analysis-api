@@ -20,6 +20,8 @@ export interface DecodedFrameHeader {
   samplesPerFrame: number;
   /** Total frame length in bytes (header + payload) — the hop to the next header. */
   frameLengthBytes: number;
+  /** True for single-channel (mono) — determines the side-info block size. */
+  isMono: boolean;
 }
 
 /** Version bits (byte 1, bits 4-3); `01` is reserved. */
@@ -66,6 +68,7 @@ export function decodeFrameHeader(buf: Buffer, offset: number): DecodedFrameHead
   const b0 = buf[offset];
   const b1 = buf[offset + 1];
   const b2 = buf[offset + 2];
+  const b3 = buf[offset + 3];
 
   // Sync word: 11 set bits.
   if (b0 !== 0xff || (b1 & 0xe0) !== 0xe0) return null;
@@ -92,5 +95,16 @@ export function decodeFrameHeader(buf: Buffer, offset: number): DecodedFrameHead
 
   if (frameLengthBytes <= 4) return null;
 
-  return { version, layer, bitrateKbps, sampleRateHz, samplesPerFrame, frameLengthBytes };
+  // Channel mode is byte 3, bits 7-6; `11` = single channel (mono).
+  const isMono = ((b3 >> 6) & 0x03) === 0b11;
+
+  return {
+    version,
+    layer,
+    bitrateKbps,
+    sampleRateHz,
+    samplesPerFrame,
+    frameLengthBytes,
+    isMono,
+  };
 }

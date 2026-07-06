@@ -63,6 +63,24 @@ export function buildFrames(specs: FrameSpec[]): Buffer {
 }
 
 /**
+ * Build a VBR/encoder info header frame (the metadata frame encoders place at
+ * the start of the audio). It is a structurally-valid frame carrying a
+ * `Xing` / `Info` / `VBRI` marker instead of audio.
+ *
+ * The default stereo frame has a 32-byte side-info block, so `Xing`/`Info` sit
+ * at offset `4 + 32 = 36`; `VBRI` is fixed at offset 36 too — so all markers
+ * land at 36 here. Uses a bitrate large enough to hold the marker.
+ */
+export function buildVbrHeaderFrame(
+  marker: 'Xing' | 'Info' | 'VBRI' = 'Xing',
+  spec: FrameSpec = {},
+): Buffer {
+  const frame = Buffer.from(buildFrame(spec)); // writable copy
+  frame.write(marker, 36, 'ascii');
+  return frame;
+}
+
+/**
  * Build a synthetic ID3v2 tag. `bodyBytes` is the declared (synchsafe) size;
  * a footer adds a trailing 10 bytes. Total skip = 10 + bodyBytes (+10 footer).
  */

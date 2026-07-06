@@ -2,6 +2,7 @@ import { UnprocessableEntityException } from '@nestjs/common';
 
 import { decodeFrameHeader } from './frame-header-helper';
 import { ID3V2_HEADER_SIZE_IN_BYTES, readId3v2Size } from './id3-tag-helper';
+import { isVbrHeaderFrame, vbrProbeBytes } from './vbr-header-helper';
 
 /**
  * A stateful, single-use frame counter fed one chunk at a time.
@@ -17,7 +18,7 @@ export interface FrameCounter {
 /** Phases of the streaming parse. */
 type Phase = 'SKIP_ID3' | 'FIND_SYNC' | 'READ_HEADER';
 
-/** ASCII "ID3" — the ID3v2 magic. */
+/** ASCII "ID3" */
 const ID3_MAGIC = [0x49, 0x44, 0x33];
 
 /**
@@ -50,7 +51,17 @@ export class StreamingFrameCounter implements FrameCounter {
     return this.frameCount;
   }
 
-  /** Run the state machine over whatever is currently in `carry`. */
+  /**
+   * Advance the parse over the bytes currently buffered in `carry`, called once
+   * per {@link feed}. Runs the phases in order: finish any in-progress skip
+   * (ID3 tag remainder or frame payload), skip a leading ID3v2 tag once, then
+   * walk and count frame headers, hopping each frame's length.
+   *
+   * Consumes as much of `carry` as it can and returns early whenever it needs
+   * more bytes to continue (a partial header, or a skip that spans into a later
+   * chunk); the leftover bytes stay in `carry` for the next call. Returns for
+   * good once end-of-audio is reached (`done`).
+   */
   private process(): void {
     // 1) Finish any pending skip (ID3 tag remainder or frame payload) first.
     this.consumeSkip();
@@ -63,18 +74,31 @@ export class StreamingFrameCounter implements FrameCounter {
     while (this.carry.length >= 4) {
       const header = decodeFrameHeader(this.carry, 0);
 
-      if (header) {
-        this.frameCount += 1;
-        this.phase = 'READ_HEADER';
-        this.skipRemaining = header.frameLengthBytes; // hop the whole frame
-        this.consumeSkip();
-        if (this.skipRemaining > 0) return; // frame continues in a later chunk
-      } else if (this.phase === 'FIND_SYNC') {
-        this.carry = this.carry.subarray(1); // not locked on yet → resync scan
-      } else {
+      if (!header) {
+        if (this.phase === 'FIND_SYNC') {
+          this.carry = this.carry.subarray(1); // not locked on yet → resync scan
+          continue;
+        }
         this.done = true; // was counting → invalid header means end of audio
         return;
       }
+
+      // The first frame may be a Xing/Info/VBRI header (VBR metadata, not audio).
+      // Tools like mediainfo exclude it, so we skip it without counting.
+      if (this.phase === 'FIND_SYNC') {
+        const probe = Math.min(header.frameLengthBytes, vbrProbeBytes(header));
+        if (this.carry.length < probe) return; // need more bytes to classify
+        this.phase = 'READ_HEADER';
+        if (!isVbrHeaderFrame(this.carry, 0, header)) {
+          this.frameCount += 1;
+        }
+      } else {
+        this.frameCount += 1;
+      }
+
+      this.skipRemaining = header.frameLengthBytes; // hop the whole frame
+      this.consumeSkip();
+      if (this.skipRemaining > 0) return; // frame continues in a later chunk
     }
   }
 

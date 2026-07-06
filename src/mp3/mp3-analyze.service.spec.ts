@@ -19,7 +19,7 @@ describe('Mp3AnalyzeService', () => {
     expect(service).toBeDefined();
   });
 
-  it('createFrameCounter returns a counter with push() and end()', () => {
+  it('createFrameCounter returns a counter with feed() and finalize()', () => {
     const counter = service.createFrameCounter();
     expect(typeof counter.feed).toBe('function');
     expect(typeof counter.finalize).toBe('function');
