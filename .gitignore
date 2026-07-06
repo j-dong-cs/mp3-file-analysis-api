@@ -1,6 +1,9 @@
 # Claude
 /.claude/
 
+# Cursor
+/.cursor/
+
 # Node
 /node_modules/
 
@@ -9,7 +12,3 @@
 
 # Test coverage
 /coverage/
-
-# Env
-.env
-

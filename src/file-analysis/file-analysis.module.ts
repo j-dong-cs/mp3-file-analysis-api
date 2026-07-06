@@ -1,16 +1,21 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { Mp3Module } from '../mp3/mp3.module';
+import { StorageModule } from '../storage/storage.module';
 import { FileUpload } from './entities/file-upload.entity';
+import { FileAnalysisService } from './file-analysis.service';
 
 /**
  * Async large-file pipeline feature. Owns the {@link FileUpload} entity +
- * repository, so it is the one place that depends on the database. Kept separate
- * from the synchronous, DB-free FileUploadModule.
+ * repository (the DB dependency), and streams stored objects through the shared
+ * counter (Mp3Module) from object storage (StorageModule).
  *
- * Storage, queue, service, and worker are added in later steps.
+ * The queue + @Processor worker are added in step 4b.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([FileUpload])],
+  imports: [TypeOrmModule.forFeature([FileUpload]), StorageModule, Mp3Module],
+  providers: [FileAnalysisService],
+  exports: [FileAnalysisService],
 })
 export class FileAnalysisModule {}
