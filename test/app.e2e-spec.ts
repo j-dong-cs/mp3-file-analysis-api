@@ -1,19 +1,34 @@
 import { INestApplication } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 
-import { AppModule } from './../src/app.module';
+import configuration from './../src/config/configuration';
+import { FileUploadModule } from './../src/file-upload/file-upload.module';
 import { buildStream } from './../src/mp3/testing/mp3-fixtures';
+
+/**
+ * Boots ONLY the synchronous streaming feature (+ config) — no DatabaseModule,
+ * so this e2e needs no Postgres/MinIO/Redis. That's the payoff of isolating the
+ * DB: the sync endpoint's tests stay hermetic.
+ */
+async function createStreamingApp(): Promise<INestApplication> {
+  const moduleFixture: TestingModule = await Test.createTestingModule({
+    imports: [
+      ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+      FileUploadModule,
+    ],
+  }).compile();
+  const app = moduleFixture.createNestApplication();
+  await app.init();
+  return app;
+}
 
 describe('POST /file-upload (e2e)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-    app = moduleFixture.createNestApplication();
-    await app.init();
+    app = await createStreamingApp();
   });
 
   afterAll(async () => {
@@ -75,11 +90,7 @@ describe('POST /file-upload size limit (e2e)', () => {
 
   beforeAll(async () => {
     process.env.MAX_UPLOAD_BYTES = '1000'; // tiny limit for the test
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-    app = moduleFixture.createNestApplication();
-    await app.init();
+    app = await createStreamingApp();
   });
 
   afterAll(async () => {
