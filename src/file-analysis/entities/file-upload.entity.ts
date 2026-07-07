@@ -41,10 +41,20 @@ export class FileUpload {
   @Column({ name: 'storage_key', type: 'varchar', length: 512, unique: true })
   storageKey!: string;
 
-  @Column({ name: 'original_filename', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'original_filename',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   originalFilename!: string | null;
 
-  @Column({ name: 'content_type', type: 'varchar', length: 128, nullable: true })
+  @Column({
+    name: 'content_type',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
   contentType!: string | null;
 
   @Column({
@@ -71,7 +81,12 @@ export class FileUpload {
   errorMessage!: string | null;
 
   /** S3 ETag / content hash — enables idempotent re-processing. */
-  @Column({ name: 'checksum_etag', type: 'varchar', length: 128, nullable: true })
+  @Column({
+    name: 'checksum_etag',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
   checksumEtag!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })

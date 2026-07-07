@@ -3,7 +3,7 @@
  *
  * The header stores small indices; the real values come from the fixed lookup tables below.
  * The current implementation only supports MPEG1 Layer III.
- * 
+ *
  * @see https://en.wikipedia.org/wiki/MPEG-1_Audio_Layer_III
  * @see https://en.wikipedia.org/wiki/ISO/IEC_11172-3
  * @see https://en.wikipedia.org/wiki/ISO/IEC_13818-3
@@ -37,9 +37,14 @@ const LAYER_BY_BITS: Record<number, MpegLayer | undefined> = {
 };
 
 /** Bitrate in kbps by the 4-bit index. 0 = free, -1 = bad (both rejected). */
-const BITRATE_KBPS: Record<MpegVersion, Record<MpegLayer, readonly number[]>> = {
+const BITRATE_KBPS: Record<
+  MpegVersion,
+  Record<MpegLayer, readonly number[]>
+> = {
   MPEG1: {
-    'Layer III': [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, -1],
+    'Layer III': [
+      0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, -1,
+    ],
   },
 };
 
@@ -62,7 +67,10 @@ const SAMPLES_PER_FRAME: Record<MpegVersion, Record<MpegLayer, number>> = {
  * by exactly this much to land on the next header. Do not also consume the
  * 4 header bytes separately.
  */
-export function decodeFrameHeader(buf: Buffer, offset: number): DecodedFrameHeader | null {
+export function decodeFrameHeader(
+  buf: Buffer,
+  offset: number,
+): DecodedFrameHeader | null {
   if (offset + 4 > buf.length) return null;
 
   const b0 = buf[offset];
@@ -91,7 +99,8 @@ export function decodeFrameHeader(buf: Buffer, offset: number): DecodedFrameHead
 
   // MPEG-1 Layer III frame length in bytes: (samplesPerFrame / 8) bytes of
   // audio per frame at the given bitrate, plus 1 byte when the padding bit is set.
-  const frameLengthBytes = Math.floor(((samplesPerFrame / 8) * bitrateBps) / sampleRateHz) + padding;
+  const frameLengthBytes =
+    Math.floor(((samplesPerFrame / 8) * bitrateBps) / sampleRateHz) + padding;
 
   if (frameLengthBytes <= 4) return null;
 

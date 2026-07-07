@@ -103,7 +103,9 @@ export class FileAnalysisService {
         fileStream.on('limit', () => {
           tooLarge = true;
           fail(
-            new PayloadTooLargeException('File exceeds the maximum allowed size'),
+            new PayloadTooLargeException(
+              'File exceeds the maximum allowed size',
+            ),
           );
         });
         fileStream.on('error', fail);
@@ -134,7 +136,9 @@ export class FileAnalysisService {
             // ever pick it up, so it must not linger as `pending`).
             await this.storage.deleteObject(key).catch(() => undefined);
             if (createdId) {
-              await this.fileUploadRepo.delete(createdId).catch(() => undefined);
+              await this.fileUploadRepo
+                .delete(createdId)
+                .catch(() => undefined);
             }
             fail(err);
           }

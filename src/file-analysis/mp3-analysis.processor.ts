@@ -22,7 +22,9 @@ export class Mp3AnalysisProcessor extends WorkerHost {
   }
 
   async process(job: Job<AnalyzeUploadJob>): Promise<void> {
-    this.logger.log(`pid=${process.pid} picked job=${job.id} upload=${job.data.uploadId}`);
+    this.logger.log(
+      `pid=${process.pid} picked job=${job.id} upload=${job.data.uploadId}`,
+    );
     await this.fileAnalysisService.processUpload(job.data.uploadId);
   }
 }

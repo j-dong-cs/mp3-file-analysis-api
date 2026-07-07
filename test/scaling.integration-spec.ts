@@ -55,9 +55,7 @@ describe('Horizontal scaling (integration — needs MinIO + Postgres + Redis)', 
     });
     await queue.obliterate({ force: true }); // clear any leftover jobs
 
-    const redis = moduleRef
-      .get(ConfigService)
-      .getOrThrow<RedisConfig>('redis');
+    const redis = moduleRef.get(ConfigService).getOrThrow<RedisConfig>('redis');
     for (let idx = 0; idx < WORKERS; idx++) {
       workers.push(
         new Worker<AnalyzeUploadJob>(
@@ -67,7 +65,10 @@ describe('Horizontal scaling (integration — needs MinIO + Postgres + Redis)', 
             await sleep(25); // simulate work so jobs spread across all workers
             await service.processUpload(job.data.uploadId);
           },
-          { connection: { host: redis.host, port: redis.port }, concurrency: 1 },
+          {
+            connection: { host: redis.host, port: redis.port },
+            concurrency: 1,
+          },
         ),
       );
     }
@@ -76,7 +77,9 @@ describe('Horizontal scaling (integration — needs MinIO + Postgres + Redis)', 
 
   afterAll(async () => {
     await Promise.all(workers.map((w) => w.close()));
-    await Promise.all(keys.map((k) => storage.deleteObject(k).catch(() => undefined)));
+    await Promise.all(
+      keys.map((k) => storage.deleteObject(k).catch(() => undefined)),
+    );
     await moduleRef.close();
   });
 

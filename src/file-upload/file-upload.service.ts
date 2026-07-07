@@ -81,7 +81,9 @@ export class FileUploadService {
         });
         fileStream.on('limit', () =>
           fail(
-            new PayloadTooLargeException('File exceeds the maximum allowed size'),
+            new PayloadTooLargeException(
+              'File exceeds the maximum allowed size',
+            ),
           ),
         );
         fileStream.on('error', fail);

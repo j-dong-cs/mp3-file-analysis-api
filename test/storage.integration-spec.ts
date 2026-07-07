@@ -51,7 +51,11 @@ describe('StorageService (integration — needs MinIO)', () => {
     const key = `test/large-${Date.now()}.bin`;
     const payload = Buffer.alloc(5 * 1024 * 1024, 0x07);
 
-    await storage.putObject(key, Readable.from(payload), 'application/octet-stream');
+    await storage.putObject(
+      key,
+      Readable.from(payload),
+      'application/octet-stream',
+    );
     const out = await readAll(await storage.getObjectStream(key));
 
     expect(out.length).toBe(payload.length);

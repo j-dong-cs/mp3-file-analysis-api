@@ -1,7 +1,7 @@
 /**
  * Pure ID3v2 tag inspection helper.
  *
- * This module is used to read the ID3v2 tag from an MP3 file. 
+ * This module is used to read the ID3v2 tag from an MP3 file.
  * MP3 files often begin with an ID3v2 metadata tag that must be skipped before
  * the audio frames start.
  */
@@ -34,5 +34,7 @@ export function readId3v2Size(buf: Buffer): Id3v2Info | null {
     ((buf[8] & 0x7f) << 7) |
     (buf[9] & 0x7f);
 
-  return { totalBytes: ID3V2_HEADER_SIZE_IN_BYTES + size + (hasFooter ? 10 : 0) };
+  return {
+    totalBytes: ID3V2_HEADER_SIZE_IN_BYTES + size + (hasFooter ? 10 : 0),
+  };
 }

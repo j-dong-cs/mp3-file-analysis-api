@@ -57,7 +57,10 @@ describe('StreamingFrameCounter', () => {
   });
 
   it('skips a leading ID3v2 tag that has a footer', () => {
-    const buf = Buffer.concat([buildId3v2(500, { footer: true }), buildStream(6)]);
+    const buf = Buffer.concat([
+      buildId3v2(500, { footer: true }),
+      buildStream(6),
+    ]);
     expect(countChunked(buf, 50)).toBe(6);
   });
 
@@ -85,7 +88,10 @@ describe('StreamingFrameCounter', () => {
   });
 
   it('ignores trailing bytes after the audio (e.g. ID3v1 TAG)', () => {
-    const buf = Buffer.concat([buildStream(5), Buffer.from('TAGsome trailing metadata')]);
+    const buf = Buffer.concat([
+      buildStream(5),
+      Buffer.from('TAGsome trailing metadata'),
+    ]);
     expect(countChunked(buf, 33)).toBe(5);
   });
 
@@ -104,7 +110,9 @@ describe('StreamingFrameCounter', () => {
   });
 
   it('throws 422 when nothing was ever pushed', () => {
-    expect(() => new StreamingFrameCounter().finalize()).toThrow(UnprocessableEntityException);
+    expect(() => new StreamingFrameCounter().finalize()).toThrow(
+      UnprocessableEntityException,
+    );
   });
 });
 

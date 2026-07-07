@@ -8,6 +8,77 @@ worker) — all behind a single `POST /file-upload` endpoint. The frame counter 
 > Scope: MPEG Version 1, Audio Layer III (the standard `.mp3` format). Other MPEG versions/layers
 > are intentionally out of scope, so the header decoder accepts only MPEG-1 Layer III frames.
 
+## Run and Test Steps:
+
+### 1. Start the infra
+
+```bash
+cd mp3-file-analysis-api        # after: git clone <repo-url>
+docker compose up -d           # MinIO(:9000/:9001), Redis(:6379), Postgres(:5432)
+docker compose ps              # wait until all show "healthy"
+```
+
+### 2. Run the API (this instance also runs the worker)
+
+```bash
+npm install                    # first time only
+npm run start:dev              # → http://localhost:3000
+# (or: npm run build && npm run start:prod)
+```
+
+### 3. Sync path — a small real file → instant count
+
+```bash
+SAMPLE=./sample.mp3            # drop the provided sample MP3 here (~1.46 MB, < 25 MB → sync)
+
+curl -F "file=@$SAMPLE;type=audio/mpeg" http://localhost:3000/file-upload
+# → {"frameCount":6089}
+
+# with timing:
+curl -s -w '\nhttp %{http_code} · %{time_total}s\n' \
+  -F "file=@$SAMPLE" http://localhost:3000/file-upload
+```
+
+### 4. Async path — route the sample through the large-file pipeline
+
+The sample is under the 25 MB threshold, so to exercise the async path either use a >25 MB file, or
+just lower the threshold and restart the server:
+
+```bash
+# stop the server (Ctrl-C), then start with a tiny threshold so any upload goes async:
+MAX_UPLOAD_BYTES=1000 npm run start:dev
+```
+
+Then upload → get a `202` + poll for the result:
+
+```bash
+SAMPLE=./sample.mp3
+
+RESP=$(curl -s -F "file=@$SAMPLE" http://localhost:3000/file-upload)
+echo "$RESP"
+# → {"uploadId":"<id>","status":"pending","statusUrl":"/file-upload/<id>"}
+ID=$(echo "$RESP" | jq -r .uploadId)       # (or copy the id by hand)
+curl -s "http://localhost:3000/file-upload/$ID" | jq
+# poll a couple times → {"id":"<id>","status":"done","frameCount":6089,"errorMessage":null}
+```
+
+### 5. Error cases (quick sanity)
+
+```bash
+curl -i -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/file-upload   # 415
+curl -i -F "file=@README.md" http://localhost:3000/file-upload                                   # 415 (not an mp3)
+curl -i -X POST -H 'Content-Type: multipart/form-data' --data 'garbage' http://localhost:3000/file-upload  # 400 (malformed)
+curl -i http://localhost:3000/file-upload/00000000-0000-0000-0000-000000000000                   # 404
+```
+
+### 6. Teardown
+
+```bash
+# Ctrl-C the server, then:
+docker compose down            # stop infra (keep data)
+docker compose down -v         # stop + wipe volumes (clean slate)
+```
+
 ## API contract
 
 ### `POST /file-upload`
@@ -116,39 +187,57 @@ reports **6089** from both.
 
 ```
 src/
-├── main.ts                       # bootstrap
-├── app.module.ts                 # composition root
-├── config/configuration.ts       # typed env config (server, S3, Redis, DB, thresholds)
-├── common/                       # FileValidator + MP3_FIELD_NAME (shared by both paths)
-├── database/                     # DatabaseModule — the Postgres connection (isolated seam)
-├── storage/                      # StorageService — S3 client → MinIO
-├── mp3/                          # framework-agnostic streaming counter + pure helpers
-├── file-upload/                  # POST /file-upload controller + sync FileUploadService
-└── file-analysis/                # async pipeline
-    ├── entities/file-upload.entity.ts   # FileUpload (file_uploads table)
-    ├── file-analysis.service.ts         # accept→S3→enqueue · processUpload · status
+├── main.ts                          # bootstrap (port via ConfigService)
+├── app.module.ts                    # composition root: Config + Database + FileUpload + FileAnalysis
+├── config/configuration.ts           # typed env config (server, S3, Redis, DB, thresholds)
+├── common/                          # shared by both upload paths
+│   ├── file.validator.ts            #   type checks (415) + the sync/async size threshold
+│   ├── upload.constants.ts          #   MP3_FIELD_NAME
+│   └── common.module.ts
+├── database/database.module.ts       # the Postgres connection (isolated seam)
+├── storage/                         # object storage
+│   ├── storage.service.ts           #   S3 client → MinIO: putObject / getObjectStream / deleteObject
+│   └── storage.module.ts
+├── mp3/                             # framework-agnostic parsing core (no @nestjs outside the service)
+│   ├── frame-counter.ts             #   StreamingFrameCounter (feed / finalize)
+│   ├── frame-header-helper.ts       #   pure MPEG-1 Layer III header decode + tables
+│   ├── id3-tag-helper.ts            #   pure ID3v2 tag-size reader
+│   ├── vbr-header-helper.ts         #   Xing/Info/VBRI header-frame detection
+│   ├── mp3-analyze.service.ts       #   createFrameCounter factory
+│   ├── mp3.module.ts                #   shares the counter with both paths
+│   ├── testing/mp3-fixtures.ts      #   synthetic MP3 builders (tests)
+│   └── *.spec.ts                    #   counter + factory unit tests
+├── file-upload/                     # the endpoint
+│   ├── file-upload.controller.ts    #   POST /file-upload (branch on size) + GET /file-upload/:id
+│   ├── file-upload.service.ts       #   sync path: busboy stream → counter
+│   └── file-upload.module.ts
+└── file-analysis/                   # async pipeline (DB-backed)
+    ├── entities/file-upload.entity.ts   # FileUpload (file_uploads table) + status enum
+    ├── file-analysis.service.ts         # acceptLargeUpload → S3 → enqueue · processUpload · status
     ├── mp3-analysis.processor.ts        # BullMQ @Processor (the worker)
+    ├── file-analysis.constants.ts       # queue name + job payload type
+    ├── file-analysis.dto.ts             # 202 + status response shapes
     └── file-analysis.module.ts          # entity + queue + worker wiring
 test/
-├── app.e2e-spec.ts               # endpoint e2e — both branches (needs the stack)
-├── *.integration-spec.ts         # storage / processing / queue (needs the stack)
-├── jest-e2e.json · jest-integration.json
-docker-compose.yml                # MinIO (S3) + Redis + Postgres
+├── app.e2e-spec.ts                          # endpoint e2e — both branches + error paths
+├── storage.integration-spec.ts              # S3 round-trip
+├── file-analysis.integration-spec.ts        # processing · rollback · concurrency
+├── mp3-analysis-queue.integration-spec.ts   # queue → worker → DB
+├── scaling.integration-spec.ts              # N workers drain M jobs
+├── memory.bench-spec.ts                     # O(1) memory benchmark (1 GB)
+└── jest-{e2e,integration,bench}.json        # per-tier Jest configs
+docker-compose.yml                   # MinIO (S3) + Redis + Postgres
+docs/TESTING.md                      # full testing plan
+.env.example                         # documented env vars
 ```
 
 ## Getting started
 
-The app is now DB/queue-backed, so the local stack must be running:
+See [Quick start](#quick-start) above for the run commands. Notes:
 
-```bash
-npm install
-docker compose up -d          # MinIO(:9000/:9001), Redis(:6379), Postgres(:5432)
-cp .env.example .env          # optional; sensible defaults match docker-compose.yml
-npm run start:dev             # → http://localhost:3000
-```
-
-TypeORM `synchronize` (dev-only, env-gated) auto-creates the `file_uploads` table on boot.
-Tear down: `docker compose down -v`.
+- `cp .env.example .env` is optional — the built-in defaults match `docker-compose.yml`.
+- TypeORM `synchronize` (dev-only, env-gated) auto-creates the `file_uploads` table on boot, so
+  there's no manual migration step in dev.
 
 ## Configuration
 
@@ -196,12 +285,32 @@ PORT=3002 node dist/main.js &
 Production would swap MinIO→S3, add presigned direct-to-S3 uploads (true transfer offload), and run
 the worker as its own deployment — all config/deployment changes, not parser changes.
 
+## Backlog (given more time)
+
+The current solution is complete for the assessment scope. With additional time, these would be the
+next priorities:
+
+- **Load testing at high traffic / throughput** — stress the sync and async paths under sustained
+  concurrent uploads (e.g. k6 or Locust), measure queue depth, worker utilization, p95 latency,
+  and failure rates; use the results to right-size worker count and connection limits.
+- **Per-user throttling** — add rate limiting (e.g. `@nestjs/throttler` or a Redis-backed token
+  bucket) on `POST /file-upload` and status polling so a single client cannot saturate the API or
+  flood the job queue.
+- **Formatting and linting enforcement** — ESLint + Prettier are configured (`npm run lint`,
+  `npm run format`); next step is CI checks (`eslint` without `--fix`, `prettier --check`) and
+  pre-commit hooks (e.g. husky + lint-staged) so style stays consistent on every commit/PR.
+- **Production cloud deployment with auto-scaling and event-driven updates** — run API and worker
+  as separate auto-scaled services (e.g. ECS/Kubernetes), use real S3 with presigned multipart
+  uploads (client uploads directly, API never sees the bytes), and replace polling with
+  event-driven job completion (S3 event notification → queue, webhook/SSE/WebSocket on `done`).
+
 ## Scripts
 
 | Script | Description |
 | ------ | ----------- |
 | `npm run start:dev` / `start:prod` | Nest dev (watch) / compiled |
 | `npm run build` · `npm run typecheck` | Compile · `tsc --noEmit` |
-| `npm run lint` · `npm run format` | ESLint (`--fix`) · Prettier |
+| `npm run format` · `npm run lint` | Prettier write · ESLint (`--fix`) |
+| `npm run check` | CI gate: `format:check` + `lint:check` + `typecheck` |
 | `npm test` · `test:e2e` · `test:integration` | Unit · endpoint e2e · infra integration |
 | `npm run test:bench` · `test:cov` | Memory O(1) benchmark · coverage |

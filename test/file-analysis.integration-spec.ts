@@ -71,7 +71,10 @@ describe('FileAnalysisService.processUpload (integration — needs MinIO + Postg
   it('streams a stored MP3 from S3, counts frames, and marks the row done', async () => {
     const key = `test/analyze-${randomUUID()}.mp3`;
     await storage.putObject(key, buildStream(42), 'audio/mpeg');
-    const upload = await service.create({ storageKey: key, contentType: 'audio/mpeg' });
+    const upload = await service.create({
+      storageKey: key,
+      contentType: 'audio/mpeg',
+    });
 
     await service.processUpload(upload.id);
 
@@ -86,7 +89,10 @@ describe('FileAnalysisService.processUpload (integration — needs MinIO + Postg
   it('marks the row failed when the object is not valid MP3 audio', async () => {
     const key = `test/bad-${randomUUID()}.mp3`;
     await storage.putObject(key, Buffer.alloc(2048), 'audio/mpeg');
-    const upload = await service.create({ storageKey: key, contentType: 'audio/mpeg' });
+    const upload = await service.create({
+      storageKey: key,
+      contentType: 'audio/mpeg',
+    });
 
     await expect(service.processUpload(upload.id)).rejects.toBeDefined();
 

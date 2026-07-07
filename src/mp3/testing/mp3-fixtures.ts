@@ -9,12 +9,28 @@ import type { FrameCounter } from '../frame-counter';
 
 /** MPEG-1 Layer III: kbps → 4-bit bitrate index. */
 const BITRATE_INDEX: Record<number, number> = {
-  32: 1, 40: 2, 48: 3, 56: 4, 64: 5, 80: 6, 96: 7, 112: 8,
-  128: 9, 160: 10, 192: 11, 224: 12, 256: 13, 320: 14,
+  32: 1,
+  40: 2,
+  48: 3,
+  56: 4,
+  64: 5,
+  80: 6,
+  96: 7,
+  112: 8,
+  128: 9,
+  160: 10,
+  192: 11,
+  224: 12,
+  256: 13,
+  320: 14,
 };
 
 /** MPEG-1: sample rate Hz → 2-bit index. */
-const SAMPLE_RATE_INDEX: Record<number, number> = { 44100: 0, 48000: 1, 32000: 2 };
+const SAMPLE_RATE_INDEX: Record<number, number> = {
+  44100: 0,
+  48000: 1,
+  32000: 2,
+};
 
 export interface FrameSpec {
   /** CBR bitrate in kbps (default 128). */
@@ -42,7 +58,9 @@ export function buildFrame(spec: FrameSpec = {}): Buffer {
   const bitrateIdx = BITRATE_INDEX[bitrateKbps];
   const srIdx = SAMPLE_RATE_INDEX[sampleRateHz];
   if (bitrateIdx === undefined || srIdx === undefined) {
-    throw new Error(`Unsupported fixture params: ${bitrateKbps}kbps @ ${sampleRateHz}Hz`);
+    throw new Error(
+      `Unsupported fixture params: ${bitrateKbps}kbps @ ${sampleRateHz}Hz`,
+    );
   }
 
   // byte1 = 1111 1011: sync(111) + version 11 (MPEG1) + layer 01 (III) + no CRC.
@@ -84,7 +102,10 @@ export function buildVbrHeaderFrame(
  * Build a synthetic ID3v2 tag. `bodyBytes` is the declared (synchsafe) size;
  * a footer adds a trailing 10 bytes. Total skip = 10 + bodyBytes (+10 footer).
  */
-export function buildId3v2(bodyBytes: number, opts: { footer?: boolean } = {}): Buffer {
+export function buildId3v2(
+  bodyBytes: number,
+  opts: { footer?: boolean } = {},
+): Buffer {
   const footer = opts.footer ?? false;
   const flags = footer ? 0x10 : 0x00;
   const size = Buffer.from([
@@ -102,7 +123,11 @@ export function buildId3v2(bodyBytes: number, opts: { footer?: boolean } = {}): 
 }
 
 /** Feed a buffer into a counter in fixed-size chunks (to exercise boundaries). */
-export function pushInChunks(counter: FrameCounter, buf: Buffer, chunkSize: number): void {
+export function pushInChunks(
+  counter: FrameCounter,
+  buf: Buffer,
+  chunkSize: number,
+): void {
   for (let i = 0; i < buf.length; i += chunkSize) {
     counter.feed(buf.subarray(i, i + chunkSize));
   }
