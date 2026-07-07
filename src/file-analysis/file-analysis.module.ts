@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { CommonModule } from '../common/common.module';
 import { CONFIG_KEYS, RedisConfig } from '../config/configuration';
 import { Mp3Module } from '../mp3/mp3.module';
 import { StorageModule } from '../storage/storage.module';
@@ -19,6 +20,7 @@ import { Mp3AnalysisProcessor } from './mp3-analysis.processor';
 @Module({
   imports: [
     TypeOrmModule.forFeature([FileUpload]),
+    CommonModule,
     StorageModule,
     Mp3Module,
     BullModule.forRootAsync({

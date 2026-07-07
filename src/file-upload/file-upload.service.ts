@@ -6,11 +6,9 @@ import {
 import busboy from 'busboy';
 import type { Request } from 'express';
 
+import { FileValidator } from '../common/file.validator';
+import { MP3_FIELD_NAME } from '../common/upload.constants';
 import { Mp3AnalyzeService } from '../mp3/mp3-analyze.service';
-import { FileValidator } from './file.validator';
-
-/** Multipart field name the client must use for the MP3 file. */
-export const MP3_FIELD_NAME = 'file';
 
 /**
  * SERVICE — countFramesWhileUpload
@@ -28,10 +26,17 @@ export class FileUploadService {
 
   countFramesWhileUpload(request: Request): Promise<number> {
     return new Promise<number>((resolve, reject) => {
-      const parser = busboy({
-        headers: request.headers,
-        limits: { files: 1, fileSize: this.fileValidator.maxBytes },
-      });
+      let parser: ReturnType<typeof busboy>;
+      try {
+        // busboy throws synchronously on a bad content-type (e.g. no boundary).
+        parser = busboy({
+          headers: request.headers,
+          limits: { files: 1, fileSize: this.fileValidator.maxBytes },
+        });
+      } catch {
+        reject(new BadRequestException('Malformed multipart request'));
+        return;
+      }
       const counter = this.mp3AnalyzeService.createFrameCounter();
 
       let settled = false;
@@ -98,7 +103,10 @@ export class FileUploadService {
           fail(err); // finalize() throws 422 when no frames were found
         }
       });
-      parser.on('error', fail);
+      // A parser-level error means the multipart body is malformed → 400.
+      parser.on('error', () =>
+        fail(new BadRequestException('Malformed multipart request')),
+      );
 
       request.on('aborted', () =>
         fail(new BadRequestException('Upload aborted before completion')),

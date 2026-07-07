@@ -30,8 +30,14 @@ export interface DbConfig {
 export interface AppConfig {
   /** Port the HTTP server listens on. */
   port: number;
-  /** Maximum accepted upload size in bytes (enforced mid-stream → 413). */
+  /**
+   * Sync/async threshold in bytes. Uploads at or below this are streamed and
+   * counted in-request; larger ones go to the async pipeline. Also the sync
+   * path's mid-stream cap (→ 413 if somehow exceeded).
+   */
   maxUploadBytes: number;
+  /** Absolute cap for the async path in bytes (→ 413 if exceeded). */
+  maxAsyncUploadBytes: number;
   s3: S3Config;
   redis: RedisConfig;
   db: DbConfig;
@@ -41,6 +47,7 @@ export interface AppConfig {
 export const CONFIG_KEYS = {
   port: 'port',
   maxUploadBytes: 'maxUploadBytes',
+  maxAsyncUploadBytes: 'maxAsyncUploadBytes',
   s3: 's3',
   redis: 'redis',
   db: 'db',
@@ -48,6 +55,7 @@ export const CONFIG_KEYS = {
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_ASYNC_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 
 /** Parse a boolean env var, defaulting when unset. */
 function parseBoolEnv(value: string | undefined, fallback: boolean): boolean {
@@ -63,6 +71,9 @@ export default (): AppConfig => ({
   port: Number(process.env.PORT ?? DEFAULT_PORT),
   maxUploadBytes: Number(
     process.env.MAX_UPLOAD_BYTES ?? DEFAULT_MAX_UPLOAD_BYTES,
+  ),
+  maxAsyncUploadBytes: Number(
+    process.env.MAX_ASYNC_UPLOAD_BYTES ?? DEFAULT_MAX_ASYNC_UPLOAD_BYTES,
   ),
   s3: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',

@@ -1,42 +1,78 @@
-import { Controller, HttpCode, Post, Req } from '@nestjs/common';
-import type { Request } from 'express';
+import {
+  Controller,
+  Get,
+  HttpStatus,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
 
+import { FileValidator } from '../common/file.validator';
+import {
+  BigFileUploadResponse,
+  UploadStatusResponse,
+} from '../file-analysis/file-analysis.dto';
+import { FileAnalysisService } from '../file-analysis/file-analysis.service';
 import { FileUploadService } from './file-upload.service';
-import { FileValidator } from './file.validator';
 
 export interface FrameCountResponse {
   frameCount: number;
 }
 
 /**
- * HTTP controller for MP3 frame-count uploads.
+ * `POST /file-upload` — one endpoint, two strategies, chosen by Content-Length:
+ *   - ≤ threshold: stream + count in-request → `200 { frameCount }`
+ *   - > threshold (or unknown length): stream to storage + enqueue → `202 { uploadId, statusUrl }`
  *
- * Exposes `POST /file-upload`, accepting a single MP3 as `multipart/form-data`
- * and responding with `{ frameCount }`. This is a thin transport layer: it
- * validates the request envelope and delegates the streaming parse and frame
- * counting to {@link FileUploadService}.
- *
- * The handler takes the raw request via `@Req()` (rather than `@UploadedFile()`)
- * so the file can be parsed while it uploads, without buffering the whole body.
- *
- * Failures raised by the validator or service propagate as Nest
- * `HttpException`s and map to the appropriate status codes:
- * `400` (missing file), `413` (too large), `415` (not multipart / not an MP3),
- * and `422` (no valid frames found).
+ * `GET /file-upload/:id` returns the async result once the worker finishes.
+ * Errors propagate as Nest HttpExceptions → 400 / 413 / 415 / 422 / 404.
  */
 @Controller('file-upload')
 export class FileUploadController {
   constructor(
-    private readonly fileUploadService: FileUploadService,
     private readonly fileValidator: FileValidator,
+    private readonly fileUploadService: FileUploadService,
+    private readonly fileAnalysisService: FileAnalysisService,
   ) {}
 
   @Post()
-  @HttpCode(200)
-  async fileUpload(@Req() request: Request): Promise<FrameCountResponse> {
+  async fileUpload(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<FrameCountResponse | BigFileUploadResponse> {
     this.fileValidator.assertMultipart(request);
-    const frameCount =
-      await this.fileUploadService.countFramesWhileUpload(request);
-    return { frameCount };
+
+    const contentLength = Number(request.headers['content-length']);
+    const isSmallFile =
+      Number.isFinite(contentLength) &&
+      contentLength <= this.fileValidator.maxBytes;
+
+    if (isSmallFile) {
+      const frameCount =
+        await this.fileUploadService.countFramesWhileUpload(request);
+      response.status(HttpStatus.OK);
+      return { frameCount };
+    }
+
+    const result = await this.fileAnalysisService.acceptLargeUpload(request);
+    response.status(HttpStatus.ACCEPTED);
+    return result;
+  }
+
+  @Get(':id')
+  async status(@Param('id') id: string): Promise<UploadStatusResponse> {
+    const upload = await this.fileAnalysisService.findById(id);
+    if (!upload) {
+      throw new NotFoundException(`Upload ${id} not found`);
+    }
+    return {
+      id: upload.id,
+      status: upload.status,
+      frameCount: upload.frameCount,
+      errorMessage: upload.errorMessage,
+    };
   }
 }
