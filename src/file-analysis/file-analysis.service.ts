@@ -1,9 +1,15 @@
+import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 
 import { Mp3AnalyzeService } from '../mp3/mp3-analyze.service';
 import { StorageService } from '../storage/storage.service';
+import {
+  AnalyzeUploadJob,
+  MP3_ANALYSIS_QUEUE,
+} from './file-analysis.constants';
 import { FileUpload, FileUploadStatus } from './entities/file-upload.entity';
 
 export interface CreateUploadParams {
@@ -15,14 +21,15 @@ export interface CreateUploadParams {
 /**
  * Owns the FileUpload lifecycle: create the record, and process it (stream the
  * object from storage through the shared frame counter, persist the result).
- * The queue/worker (step 4b) will call {@link processUpload}; here we implement
- * and test the core so it's queue-independent and deterministic.
+ * The queue/worker calls {@link processUpload} to run the job;
  */
 @Injectable()
 export class FileAnalysisService {
   constructor(
     @InjectRepository(FileUpload)
     private readonly fileUploadRepo: Repository<FileUpload>,
+    @InjectQueue(MP3_ANALYSIS_QUEUE)
+    private readonly analysisQueue: Queue<AnalyzeUploadJob>,
     private readonly storage: StorageService,
     private readonly mp3: Mp3AnalyzeService,
   ) {}
@@ -43,6 +50,23 @@ export class FileAnalysisService {
   }
 
   /**
+   * Enqueue a background job to analyze an already-stored upload.
+   * Retries with backoff (the parse is deterministic, so retries are safe).
+   */
+  async enqueue(uploadId: string): Promise<void> {
+    await this.analysisQueue.add(
+      'analyze',
+      { uploadId },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        removeOnComplete: true,
+        removeOnFail: 100,
+      },
+    );
+  }
+
+  /**
    * Stream the stored object through the frame counter and persist the result.
    * Marks the row processing → done (with frameCount) or failed (with the
    * error). Re-throws so an at-least-once queue can retry.
@@ -60,18 +84,18 @@ export class FileAnalysisService {
     try {
       const counter = this.mp3.createFrameCounter();
       const stream = await this.storage.getObjectStream(upload.storageKey);
-      let bytesSeen = 0;
+      let bytesProcessed = 0;
       for await (const chunk of stream) {
         const buf = chunk as Buffer;
-        bytesSeen += buf.length;
-        counter.feed(buf); // O(1) memory regardless of object size
+        bytesProcessed += buf.length;
+        counter.feed(buf);
       }
       const frameCount = counter.finalize();
 
       await this.fileUploadRepo.update(uploadId, {
         status: FileUploadStatus.Done,
         frameCount,
-        sizeBytes: bytesSeen,
+        sizeBytes: bytesProcessed,
         errorMessage: null,
         completedAt: new Date(),
       });
